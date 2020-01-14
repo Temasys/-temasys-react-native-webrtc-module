@@ -28,9 +28,11 @@ import org.webrtc.MediaStream;
 import org.webrtc.MediaStreamTrack;
 import org.webrtc.PeerConnection;
 import org.webrtc.RtpReceiver;
+import org.webrtc.RtpSender;
 import org.webrtc.StatsObserver;
 import org.webrtc.StatsReport;
 import org.webrtc.VideoTrack;
+import org.webrtc.RtpTransceiver;
 
 class PeerConnectionObserver implements PeerConnection.Observer {
     private final static String TAG = WebRTCModule.TAG;
@@ -40,8 +42,10 @@ class PeerConnectionObserver implements PeerConnection.Observer {
     private final int id;
     private PeerConnection peerConnection;
     final List<MediaStream> localStreams;
+    final List<MediaStreamTrack> localTracks;
     final Map<String, MediaStream> remoteStreams;
     final Map<String, MediaStreamTrack> remoteTracks;
+    final Map<String, RtpSender> senders;
     private final VideoTrackAdapter videoTrackAdapters;
     private final WebRTCModule webRTCModule;
 
@@ -58,8 +62,10 @@ class PeerConnectionObserver implements PeerConnection.Observer {
         this.webRTCModule = webRTCModule;
         this.id = id;
         this.localStreams = new ArrayList<MediaStream>();
+        this.localTracks = new ArrayList<MediaStreamTrack>();
         this.remoteStreams = new HashMap<String, MediaStream>();
         this.remoteTracks = new HashMap<String, MediaStreamTrack>();
+        this.senders = new HashMap<String, RtpSender>();
         this.videoTrackAdapters = new VideoTrackAdapter(webRTCModule, id);
     }
 
@@ -71,6 +77,7 @@ class PeerConnectionObserver implements PeerConnection.Observer {
      * associated <tt>PeerConnection</tt>
      * @return <tt>true</tt> if the specified <tt>localStream</tt> was added to
      * the associated <tt>PeerConnection</tt>; otherwise, <tt>false</tt>
+     * @deprecated
      */
     boolean addStream(MediaStream localStream) {
         if (peerConnection != null && peerConnection.addStream(localStream)) {
@@ -83,6 +90,91 @@ class PeerConnectionObserver implements PeerConnection.Observer {
     }
 
     /**
+     * Adds a specific local <tt>MediaStreamTrack</tt> to the associated
+     * <tt>PeerConnection</tt>.
+     *
+     * @param localTrack the local <tt>MediaStreamTrack</tt> to add to the
+     * associated <tt>PeerConnection</tt>
+     * @return <tt>true</tt> if the specified <tt>localTrack</tt> was added to
+     * the associated <tt>PeerConnection</tt>; otherwise, <tt>false</tt>
+     */
+    boolean addTrack(MediaStreamTrack localTrack, MediaStream localStream) {
+        if (peerConnection != null) {
+            Log.d(TAG, "START pc.addTrack ------------------- " + "peerConnection ID: " + id);
+            // save to local
+            localStreams.add(localStream);
+            localTracks.add(localTrack);
+            String trackId = localTrack.id();
+            Log.d(TAG, "track ID: " + trackId);
+
+            String streamId = localStream.getId();
+            List<String> streamIds = new ArrayList<String>();
+            streamIds.add(streamId);
+            RtpSender sender = peerConnection.addTrack(localTrack, streamIds);
+
+            WritableMap params = Arguments.createMap();
+            String senderId = sender.id();
+            MediaStreamTrack senderTrack = sender.track();
+            String senderTrackId = senderTrack.id();
+            params.putInt("id", id);
+            params.putString("senderId", senderId); // most of the time senderId is trackId
+            params.putString("senderTrackId", senderTrackId); // check senderTrackId when senderId is not the trackId
+            webRTCModule.sendEvent("peerConnectionAddedSender", params);
+
+            senders.put(trackId, sender);
+            Log.d(TAG, "Created Sender ID: " + senderId);
+            Log.d(TAG, "Created Sender Track ID: " + senderTrackId);
+            Log.d(TAG, "Current localTracks: " + localTracks);
+
+            Log.d(TAG, "END pc.addTrack -------------------");
+
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Removes a track from the associated <tt>PeerConnection</tt>.
+     * @param localTrack the local <tt>MediaStreamTrack</tt> to remove from the
+     * associated <tt>PeerConnection</tt>
+     * @return <tt>true</tt> if the specified <tt>localTrack</tt> was removed from
+     * the associated <tt>PeerConnection</tt>; otherwise, <tt>false</tt>
+     */
+    boolean removeTrack(MediaStreamTrack localTrack) {
+        if (peerConnection != null) {
+            Log.d(TAG, "START pc.removeTrack ------------------- " + "peerConnection ID: " + id);
+            Log.d(TAG, "Logging transceivers before removeTrack");
+            getTransceivers();
+
+            String trackId = new String(localTrack.id());
+            RtpSender sender = senders.get(trackId);
+            String senderId = new String(sender.id());
+
+            WritableMap params = Arguments.createMap();
+            MediaStreamTrack senderTrack = sender.track();
+            String senderTrackId = senderTrack.id();
+            params.putInt("id", id);
+            params.putString("senderId", senderId); // most of the time senderId is trackId
+            params.putString("senderTrackId", senderTrackId); // check senderTrackId when senderId is not the trackId
+            webRTCModule.sendEvent("peerConnectionRemovedSender", params);
+            senders.remove(trackId);
+
+            Log.d(TAG, "Track to delete ID: " + trackId);
+            Log.d(TAG, "Sender to remove ID: " + senderId);
+            Log.d(TAG, "Removed sender: " + peerConnection.removeTrack(sender));
+
+        }
+
+        Log.d(TAG, "Logging transceivers after removeTrack");
+        getTransceivers();
+
+        Log.d(TAG, "END pc.removeTrack -------------------");
+
+        return localTracks.remove(localTrack);
+    }
+
+    /**
      * Removes a specific local <tt>MediaStream</tt> from the associated
      * <tt>PeerConnection</tt>.
      *
@@ -91,6 +183,7 @@ class PeerConnectionObserver implements PeerConnection.Observer {
      * @return <tt>true</tt> if removing the specified <tt>mediaStream</tt> from
      * this instance resulted in a modification of its internal list of local
      * <tt>MediaStream</tt>s; otherwise, <tt>false</tt>
+     * @deprecated
      */
     boolean removeStream(MediaStream localStream) {
         if (peerConnection != null) {
@@ -109,20 +202,7 @@ class PeerConnectionObserver implements PeerConnection.Observer {
     }
 
     void close() {
-        Log.d(TAG, "PeerConnection.close() for " + id);
-
-        // Close the PeerConnection first to stop any events.
-        peerConnection.close();
-
-        // PeerConnection.dispose() calls MediaStream.dispose() on all local
-        // MediaStreams added to it and the app may crash if a local MediaStream
-        // is added to multiple PeerConnections. In order to reduce the risks of
-        // an app crash, remove all local MediaStreams from the associated
-        // PeerConnection so that it doesn't attempt to dispose of them.
-        for (MediaStream localStream : new ArrayList<>(localStreams)) {
-            removeStream(localStream);
-        }
-
+        Log.d(TAG, "START pc.close ------------------- " + "peerConnection ID: " + id);
         // Remove video track adapters
         for (MediaStream stream : remoteStreams.values()) {
             for (VideoTrack videoTrack : stream.videoTracks) {
@@ -130,17 +210,19 @@ class PeerConnectionObserver implements PeerConnection.Observer {
             }
         }
 
-        // At this point there should be no local MediaStreams in the associated
-        // PeerConnection. Call dispose() to free all remaining resources held
+        //Call dispose() to free all remaining resources held
         // by the PeerConnection instance (RtpReceivers, RtpSenders, etc.)
         peerConnection.dispose();
-
+        localTracks.clear();
+        localStreams.clear();
         remoteStreams.clear();
         remoteTracks.clear();
+        senders.clear();
 
         // Unlike on iOS, we cannot unregister the DataChannel.Observer
         // instance on Android. At least do whatever else we do on iOS.
         dataChannels.clear();
+        Log.d(TAG, "END pc.close -------------------");
     }
 
     void createDataChannel(String label, ReadableMap config) {
@@ -335,8 +417,13 @@ class PeerConnectionObserver implements PeerConnection.Observer {
         return null;
     }
 
+    /**
+     * Listen onAddTrack
+     * @deprecated
+     */
     @Override
     public void onAddStream(MediaStream mediaStream) {
+        Log.d(TAG, "onAddStream");
         String streamReactTag = null;
         String streamId = mediaStream.getId();
         // The native WebRTC implementation has a special concept of a default
@@ -400,6 +487,10 @@ class PeerConnectionObserver implements PeerConnection.Observer {
         webRTCModule.sendEvent("peerConnectionAddedStream", params);
     }
 
+    /**
+     * PeerConnection.removeTrack(sender) used instead. There is no corresponding listener e.g onremovetrack for native unlike browser
+     * @deprecated
+     */
     @Override
     public void onRemoveStream(MediaStream mediaStream) {
         String streamReactTag = getReactTagForStream(mediaStream);
@@ -471,7 +562,144 @@ class PeerConnectionObserver implements PeerConnection.Observer {
 
     @Override
     public void onAddTrack(final RtpReceiver receiver, final MediaStream[] mediaStreams) {
-        Log.d(TAG, "onAddTrack");
+        Log.d(TAG, "START onAddTrack ------------------- " + "peerConnection ID: " + id);
+
+        WritableMap params = Arguments.createMap();
+        params.putInt("id", id);
+
+        WritableArray streams = Arguments.createArray();
+
+        for (int s = 0; s < mediaStreams.length; s++) {
+            MediaStream stream = mediaStreams[s];
+            String streamReactTag = null;
+            String streamId = stream.getId();
+            // The native WebRTC implementation has a special concept of a default
+            // MediaStream instance with the label default that the implementation
+            // reuses.
+            if ("default".equals(streamId)) {
+                for (Map.Entry<String, MediaStream> e : remoteStreams.entrySet()) {
+                    if (e.getValue().equals(stream)) {
+                        streamReactTag = e.getKey();
+                        break;
+                    }
+                }
+            }
+
+            if (streamReactTag == null) {
+                streamReactTag = UUID.randomUUID().toString();
+                remoteStreams.put(streamReactTag, stream);
+            }
+
+            WritableMap streamInfo = Arguments.createMap();
+            streamInfo.putString("id", streamId);
+            streamInfo.putString("streamId", streamId);
+            streamInfo.putString("streamReactTag", streamReactTag);
+
+            WritableArray tracks = Arguments.createArray();
+
+            for (int i = 0; i < stream.videoTracks.size(); i++) {
+                VideoTrack track = stream.videoTracks.get(i);
+                String trackId = track.id();
+
+                remoteTracks.put(trackId, track);
+
+                WritableMap trackInfo = Arguments.createMap();
+                trackInfo.putString("id", trackId);
+                trackInfo.putString("label", "Video");
+                trackInfo.putString("kind", track.kind());
+                trackInfo.putBoolean("enabled", track.enabled());
+                trackInfo.putString("readyState", track.state().toString());
+                trackInfo.putBoolean("remote", true);
+                tracks.pushMap(trackInfo);
+
+                videoTrackAdapters.addAdapter(streamReactTag, track);
+                Log.d(TAG, "video track added - id: " + trackId);
+            }
+            for (int i = 0; i < stream.audioTracks.size(); i++) {
+                AudioTrack track = stream.audioTracks.get(i);
+                String trackId = track.id();
+
+                remoteTracks.put(trackId, track);
+
+                WritableMap trackInfo = Arguments.createMap();
+                trackInfo.putString("id", trackId);
+                trackInfo.putString("label", "Audio");
+                trackInfo.putString("kind", track.kind());
+                trackInfo.putBoolean("enabled", track.enabled());
+                trackInfo.putString("readyState", track.state().toString());
+                trackInfo.putBoolean("remote", true);
+                tracks.pushMap(trackInfo);
+
+                Log.d(TAG, "audio track added - id: " + trackId);
+            }
+            streamInfo.putArray("tracks", tracks);
+            streams.pushMap(streamInfo);
+        }
+
+        params.putArray("streams", streams);
+
+        // Retrieve transceiverMid from getTransceiver() and match it with returned receiver
+        List<RtpTransceiver> pcTransceivers = peerConnection.getTransceivers();
+        for (int t = 0; t < pcTransceivers.size(); t++) {
+            RtpTransceiver transceiver = pcTransceivers.get(t);
+            RtpReceiver t_receiver = transceiver.getReceiver();
+            String t_receiverId = new String(t_receiver.id());
+            String receiverId = new String(receiver.id());
+            if (t_receiverId.equals(receiverId)) {
+                String transceiverMid = transceiver.getMid();
+                params.putString("transceiverMid", transceiverMid);
+                Log.d(TAG, "transceiverMid: " + transceiverMid);
+            }
+        }
+
+        // This is the only way to pass transceivers list to peerConnection.js to be stored locally
+        WritableArray transceivers = getTransceivers();
+        params.putArray("transceivers", transceivers);
+        webRTCModule.sendEvent("peerConnectionAddTrack", params);
+        Log.d(TAG, "END onAddTrack -------------------");
+    }
+
+    /**
+     * Native getTransceivers
+     * @return
+     */
+   public WritableArray getTransceivers() {
+        WritableArray m_transceivers = Arguments.createArray();
+        if (peerConnection != null) {
+            List<RtpTransceiver> transceivers = peerConnection.getTransceivers();
+            // for each transceiver in list build writeableMap
+            Log.d(TAG, "START pc.getTransceivers ------------------- " + "peerConnection ID: " + id);
+                for (int t = 0; t < transceivers.size(); t++) {
+                    WritableMap transceiverInfo = Arguments.createMap();
+                    RtpTransceiver transceiver = transceivers.get(t);
+                    MediaStreamTrack.MediaType mediaType = transceiver.getMediaType();
+                    String transceiverMid = transceiver.getMid();
+                    RtpSender sender = transceiver.getSender();
+                    RtpReceiver receiver = transceiver.getReceiver();
+                    RtpTransceiver.RtpTransceiverDirection transceiverDirection = transceiver.getDirection();
+                    transceiverInfo.putString("transceiverDirection", transceiverDirection.toString());
+                    transceiverInfo.putString("transceiverMid", transceiverMid);
+                    Log.d(TAG, "transceiverDirection: " + transceiverDirection);
+                    Log.d(TAG, "transceiverMid: " + transceiverMid);
+                    // build senderInfo
+                    MediaStreamTrack senderTrack = sender.track();
+                    if (senderTrack != null) {
+                        String senderTrackId = senderTrack.id();
+                        transceiverInfo.putString("senderTrackId", senderTrackId);
+                        Log.d(TAG, "senderTrackId: " + senderTrackId);
+                    }
+                    // build receiverInfo
+                    MediaStreamTrack receiverTrack = receiver.track();
+                    if (receiverTrack != null) {
+                        String receiverTrackId = receiverTrack.id();
+                        transceiverInfo.putString("receiverTrackId", receiverTrackId);
+                        Log.d(TAG, "receiverTrackId: " + receiverTrackId);
+                    }
+                    m_transceivers.pushMap(transceiverInfo);
+                }
+            Log.d(TAG, "END pc.getTransceivers -------------------");
+        }
+        return m_transceivers;
     }
 
     @Nullable

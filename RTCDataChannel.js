@@ -117,14 +117,14 @@ export default class RTCDataChannel extends EventTarget(DATA_CHANNEL_EVENTS) {
   _registerEvents() {
     this._subscriptions = [
       DeviceEventEmitter.addListener('dataChannelStateChanged', ev => {
+        this.readyState = ev.state;
         if (ev.peerConnectionId !== this._peerConnectionId
             || ev.id !== this.id) {
           return;
         }
-        this.readyState = ev.state;
         if (this.readyState === 'open') {
           this.dispatchEvent(new RTCDataChannelEvent('open', {channel: this}));
-        } else if (this.readyState === 'close') {
+        } else if (this.readyState === 'closed') {
           this.dispatchEvent(new RTCDataChannelEvent('close', {channel: this}));
           this._unregisterEvents();
         }

@@ -16,6 +16,7 @@ import com.facebook.react.bridge.ReadableType;
 import com.facebook.react.bridge.WritableMap;
 import com.facebook.react.module.annotations.ReactModule;
 import com.facebook.react.modules.core.DeviceEventManagerModule;
+import com.facebook.react.bridge.WritableArray;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -33,6 +34,7 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
     PeerConnectionFactory mFactory;
     private final SparseArray<PeerConnectionObserver> mPeerConnectionObservers;
     final Map<String, MediaStream> localStreams;
+    final Map<String, MediaStreamTrack> localTracks;
 
     /**
      * The implementation of {@code getUserMedia} extracted into a separate file
@@ -69,6 +71,7 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
 
         mPeerConnectionObservers = new SparseArray<>();
         localStreams = new HashMap<>();
+        localTracks = new HashMap<>();
 
         ThreadUtils.runOnExecutor(() -> initAsync(options));
     }
@@ -379,6 +382,19 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
             conf.presumeWritableWhenFullyRelayed = v;
         }
 
+        // presumeWritableWhenFullyRelayed (private api)
+        if (map.hasKey("sdpSemantics")
+                && map.getType("sdpSemantics") == ReadableType.String) {
+            final String v = map.getString("sdpSemantics");
+            if (v != null) {
+                switch (v) {
+                case "unified-plan": // public
+                    conf.sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN;
+                    break;
+                }
+            }
+        }
+
         return conf;
     }
 
@@ -477,6 +493,16 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
         return mediaConstraints;
     }
 
+   @ReactMethod
+    public WritableArray peerConnectionGetTransceivers(int id) {
+        PeerConnectionObserver pco = mPeerConnectionObservers.get(id);
+        if (pco != null) {
+            WritableArray transceivers = pco.getTransceivers();
+            return transceivers;
+        }
+        return Arguments.createArray();
+    }
+
     @ReactMethod
     public void getUserMedia(ReadableMap constraints,
                              Callback    successCallback,
@@ -501,6 +527,12 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
         localStreams.put(id, mediaStream);
     }
 
+    /**
+     * Track is added to the Peer Connection instread of the MediaStream obj
+     * @param streamId
+     * @param trackId
+     * @deprecated
+     */
     @ReactMethod
     public void mediaStreamAddTrack(String streamId, String trackId) {
         ThreadUtils.runOnExecutor(() ->
@@ -524,6 +556,12 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
         }
     }
 
+    /**
+     * Track is removed from the Peer Connection instread of the MediaStream obj
+     * @param streamId
+     * @param trackId
+     * @deprecated
+     */
     @ReactMethod
     public void mediaStreamRemoveTrack(String streamId, String trackId) {
         ThreadUtils.runOnExecutor(() ->
@@ -646,6 +684,7 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
         peerConnection.setConfiguration(parseRTCConfiguration(configuration));
     }
 
+    // deprecated use peerConnectionAddTrack
     @ReactMethod
     public void peerConnectionAddStream(String streamId, int id) {
         ThreadUtils.runOnExecutor(() ->
@@ -665,6 +704,44 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
     }
 
     @ReactMethod
+    public void peerConnectionAddTrack(String trackId, String streamId, int id) {
+        ThreadUtils.runOnExecutor(() ->
+                peerConnectionAddTrackAsync(trackId, streamId, id));
+    }
+
+    private void peerConnectionAddTrackAsync(String trackId, String streamId, int id) {
+        MediaStreamTrack track = getLocalTrack(trackId);
+        MediaStream mediaStream = localStreams.get(streamId);
+        if (track == null) {
+            Log.d(TAG, "peerConnectionAddTrack() track is null");
+            return;
+        }
+        PeerConnectionObserver pco = mPeerConnectionObservers.get(id);
+        if (pco == null || !pco.addTrack(track, mediaStream)) {
+            Log.e(TAG, "peerConnectionAddTrack() failed");
+        }
+    }
+
+    @ReactMethod
+    public void peerConnectionRemoveTrack(String trackId, String streamId, int id) {
+        ThreadUtils.runOnExecutor(() ->
+                peerConnectionRemoveTrackAsync(trackId, streamId, id));
+    }
+
+    private void peerConnectionRemoveTrackAsync(String trackId, String streamId, int id) {
+        MediaStream mediaStream = localStreams.get(streamId);
+        MediaStreamTrack mediaStreamTrack = getLocalTrack(trackId);
+        if (mediaStreamTrack == null) {
+            Log.d(TAG, "peerConnectionRemoveTrack() mediaStreamTrack is null");
+            return;
+        }
+        PeerConnectionObserver pco = mPeerConnectionObservers.get(id);
+        if (pco == null || !pco.removeTrack(mediaStreamTrack)) {
+            Log.e(TAG, "peerConnectionRemoveTrack() failed");
+        }
+    }
+
+    @ReactMethod
     public void peerConnectionRemoveStream(String streamId, int id) {
         ThreadUtils.runOnExecutor(() ->
             peerConnectionRemoveStreamAsync(streamId, id));
@@ -679,6 +756,24 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
         PeerConnectionObserver pco = mPeerConnectionObservers.get(id);
         if (pco == null || !pco.removeStream(mediaStream)) {
             Log.e(TAG, "peerConnectionRemoveStream() failed");
+        }
+    }
+
+    @ReactMethod
+    public void peerConnectionRemoveTrack(String trackId, int id) {
+        ThreadUtils.runOnExecutor(() ->
+                peerConnectionRemoveTrackAsync(trackId, id));
+    }
+
+    private void peerConnectionRemoveTrackAsync(String trackId, int id) {
+        MediaStreamTrack mediaStreamTrack = localTracks.get(trackId);
+        if (mediaStreamTrack == null) {
+            Log.d(TAG, "peerConnectionRemoveTrack() mediaStreamTrack is null");
+            return;
+        }
+        PeerConnectionObserver pco = mPeerConnectionObservers.get(id);
+        if (pco == null || !pco.removeTrack(mediaStreamTrack)) {
+            Log.e(TAG, "peerConnectionRemoveTrack() failed");
         }
     }
 
@@ -733,6 +828,7 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
     private void peerConnectionCreateAnswerAsync(int id,
                                                  ReadableMap options,
                                                  final Callback callback) {
+                                                     Log.d(TAG, "peerConnectionCreateAnswer() start");
         PeerConnection peerConnection = getPeerConnection(id);
 
         if (peerConnection != null) {
@@ -894,7 +990,8 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
         PeerConnectionObserver pco = mPeerConnectionObservers.get(id);
         if (pco == null || pco.getPeerConnection() == null) {
             Log.d(TAG, "peerConnectionGetStats() peerConnection is null");
-            cb.invoke(false, "PeerConnection ID not found");
+            String emptyStats = "{}";
+            cb.invoke(true, emptyStats);
         } else {
             pco.getStats(trackId, cb);
         }
