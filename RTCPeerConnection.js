@@ -279,10 +279,13 @@ export default class RTCPeerConnection extends EventTarget(PEER_CONNECTION_EVENT
                 const stats = JSON.parse(data);
                 resolve(stats);
               } catch (e) {
-                reject(e);
+                resolve(null);
+                // React Native app will display en error when if the Promise is rejected. Resolve with null object and web sdk will ignore the stats object
+                // reject(e);
               }
             } else {
-              reject(new Error(data));
+              resolve(null);
+              // reject(new Error(data));
             }
           });
     });
@@ -539,29 +542,32 @@ export default class RTCPeerConnection extends EventTarget(PEER_CONNECTION_EVENT
   id = dataChannelDict.id;
   if (typeof id !== 'number') {
   throw new TypeError('DataChannel id must be a number: ' + id);
-}
-if (dataChannelIds.has(id)) {
-  throw new ResourceInUse('DataChannel id already in use: ' + id);
-}
-} else {
-  // Allocate a new id.
-  // TODO Remembering the last used/allocated id and then incrementing it to
-  // generate the next id to use will surely be faster. However, I want to
-  // reuse ids (in the future) as the RTCDataChannel.id space is limited to
-  // unsigned short by the standard:
-  // https://www.w3.org/TR/webrtc/#dom-datachannel-id. Additionally, 65535
-  // is reserved due to SCTP INIT and INIT-ACK chunks only allowing a
-  // maximum of 65535 streams to be negotiated (as defined by the WebRTC
-  // Data Channel Establishment Protocol).
-  for (id = 0; id < 65535 && dataChannelIds.has(id); ++id);
-  // TODO Throw an error if no unused id is available.
-  dataChannelDict = Object.assign({id}, dataChannelDict);
-}
-WebRTCModule.createDataChannel(
-    this._peerConnectionId,
-    label,
-    dataChannelDict);
-dataChannelIds.add(id);
-return new RTCDataChannel(this._peerConnectionId, label, dataChannelDict);
-}
+  }
+  if (dataChannelIds.has(id)) {
+    throw new ResourceInUse('DataChannel id already in use: ' + id);
+  }
+  } else {
+    // Allocate a new id.
+    // TODO Remembering the last used/allocated id and then incrementing it to
+    // generate the next id to use will surely be faster. However, I want to
+    // reuse ids (in the future) as the RTCDataChannel.id space is limited to
+    // unsigned short by the standard:
+    // https://www.w3.org/TR/webrtc/#dom-datachannel-id. Additionally, 65535
+    // is reserved due to SCTP INIT and INIT-ACK chunks only allowing a
+    // maximum of 65535 streams to be negotiated (as defined by the WebRTC
+    // Data Channel Establishment Protocol).
+    for (id = 0; id < 65535 && dataChannelIds.has(id); ++id);
+    // TODO Throw an error if no unused id is available.
+    dataChannelDict = Object.assign({id}, dataChannelDict);
+  }
+  // Skylink creates a test dataChannel to obtain data channel information which can be filled by just returning an instance of RTCDataChannel without calling native code
+  if (label !== 'test'){
+    WebRTCModule.createDataChannel(
+        this._peerConnectionId,
+        label,
+        dataChannelDict);
+    dataChannelIds.add(id);
+  }
+  return new RTCDataChannel(this._peerConnectionId, label, dataChannelDict);
+  }
 }

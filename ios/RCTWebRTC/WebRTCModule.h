@@ -28,6 +28,8 @@
 @property (nonatomic, strong) NSMutableDictionary<NSNumber *, RTCPeerConnection *> *peerConnections;
 @property (nonatomic, strong) NSMutableDictionary<NSString *, RTCMediaStream *> *localStreams;
 @property (nonatomic, strong) NSMutableDictionary<NSString *, RTCMediaStreamTrack *> *localTracks;
+@property (nonatomic, strong) NSMutableDictionary<NSString *, RTCRtpSender *> *rtpSenders;
+@property (nonatomic, strong) NSMutableArray<RTCRtpTransceiver *> *rtpTransceivers;
 
 - (instancetype)initWithEncoderFactory:(id<RTCVideoEncoderFactory>)encoderFactory
                         decoderFactory:(id<RTCVideoDecoderFactory>)decoderFactory;

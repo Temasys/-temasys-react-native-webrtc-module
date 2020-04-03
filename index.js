@@ -21,6 +21,7 @@ export {
   registerGlobals
 };
 
+// Skylink AdapterJS does not need to call this function as it builds its own global object
 function registerGlobals() {
 	// Should not happen. React Native has a global navigator object.
 	if (typeof navigator !== 'object') {
