@@ -28,11 +28,17 @@ class MediaDevices extends EventTarget(MEDIA_DEVICES_EVENTS) {
      * implementation.
      * See: https://www.w3.org/TR/mediacapture-streams/#dom-mediadevices-enumeratedevices
      *
-     * @param {*} constraints 
+     * @param {*} constraints
      * @returns {Promise}
      */
     getUserMedia(constraints) {
         return getUserMedia(constraints);
+    }
+
+    // Skylink React Native is not supporting screen sharing
+    getDisplayMedia() {
+        const error = new Error ("Screensharing is not supported in Skylink React Native SDK");
+        return new Promise((resolve, reject) => reject(error));
     }
 }
 

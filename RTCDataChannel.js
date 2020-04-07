@@ -142,5 +142,4 @@ export default class RTCDataChannel extends EventTarget(DATA_CHANNEL_EVENTS) {
       }),
     ];
   }
-
 }

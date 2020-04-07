@@ -27,8 +27,10 @@ RCT_EXPORT_METHOD(createDataChannel:(nonnull NSNumber *)peerConnectionId
                               label:(NSString *)label
                              config:(RTCDataChannelConfiguration *)config
 {
-  RTCPeerConnection *peerConnection = self.peerConnections[peerConnectionId];
-  RTCDataChannel *dataChannel = [peerConnection dataChannelForLabel:label configuration:config];
+
+    RTCPeerConnection *peerConnection = self.peerConnections[peerConnectionId];
+    RTCDataChannel *dataChannel = [peerConnection dataChannelForLabel:label configuration:config];
+
   if (dataChannel != nil && (dataChannel.readyState == RTCDataChannelStateConnecting
       || dataChannel.readyState == RTCDataChannelStateOpen)) {
     dataChannel.peerConnectionId = peerConnectionId;
@@ -106,13 +108,14 @@ RCT_EXPORT_METHOD(dataChannelSend:(nonnull NSNumber *)peerConnectionId
   NSDictionary *event = @{@"id": @(channel.channelId),
                           @"peerConnectionId": channel.peerConnectionId,
                           @"type": type,
+                          @"label": channel.label,
                           // XXX NSDictionary will crash the process upon
                           // attempting to insert nil. Such behavior is
                           // unacceptable given that protection in such a
                           // scenario is extremely simple.
                           @"data": (data ? data : [NSNull null])};
   [self.bridge.eventDispatcher sendDeviceEventWithName:@"dataChannelReceiveMessage"
-                                                  body:event];
+                                                 body:event];
 }
 
 @end

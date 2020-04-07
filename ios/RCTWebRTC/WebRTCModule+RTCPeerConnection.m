@@ -19,6 +19,7 @@
 #import <WebRTC/RTCIceCandidate.h>
 #import <WebRTC/RTCLegacyStatsReport.h>
 #import <WebRTC/RTCSessionDescription.h>
+#import <WebRTC/RTCRtpTransceiver.h>
 
 #import "WebRTCModule.h"
 #import "WebRTCModule+RTCDataChannel.h"
@@ -88,6 +89,9 @@ RCT_EXPORT_METHOD(peerConnectionInit:(RTCConfiguration*)configuration
   RTCMediaConstraints* constraints =
       [[RTCMediaConstraints alloc] initWithMandatoryConstraints:nil
                                             optionalConstraints:optionalConstraints];
+    [configuration setBundlePolicy:RTCBundlePolicyBalanced];
+    [configuration setSdpSemantics:RTCSdpSemanticsUnifiedPlan];
+    // NSLog( @"configuration: '%@'", configuration );
   RTCPeerConnection *peerConnection
     = [self.peerConnectionFactory
       peerConnectionWithConfiguration:configuration
@@ -101,6 +105,8 @@ RCT_EXPORT_METHOD(peerConnectionInit:(RTCConfiguration*)configuration
   peerConnection.videoTrackAdapters = [NSMutableDictionary new];
   peerConnection.webRTCModule = self;
   self.peerConnections[objectID] = peerConnection;
+  self.rtpSenders = [NSMutableDictionary new];
+  self.rtpTransceivers = [NSMutableArray new];
 }
 
 RCT_EXPORT_METHOD(peerConnectionSetConfiguration:(RTCConfiguration*)configuration objectID:(nonnull NSNumber *)objectID)
@@ -124,6 +130,53 @@ RCT_EXPORT_METHOD(peerConnectionAddStream:(nonnull NSString *)streamID objectID:
   }
 
   [peerConnection addStream:stream];
+}
+
+RCT_EXPORT_METHOD(peerConnectionAddTrack:(nonnull NSString *)trackID streamID:(nonnull NSString *)streamID objectID:(nonnull NSNumber *)objectID)
+{
+  RTCPeerConnection *peerConnection = self.peerConnections[objectID];
+  if (!peerConnection) {
+    return;
+  }
+
+  RTCMediaStreamTrack *track = self.localTracks[trackID];
+  if (!track) {
+    return;
+  }
+
+  RTCRtpSender *sender = [peerConnection addTrack:track streamIds:@[streamID]];
+
+  [self.rtpSenders setObject:sender forKey:trackID];
+  NSLog( @"self.rtpSenders: '%@'", self.rtpSenders );
+
+  [self.bridge.eventDispatcher sendDeviceEventWithName:@"peerConnectionAddedSender"
+    body:@{@"id": peerConnection.reactTag, @"senderId": sender.senderId, @"senderTrackId": trackID}];
+
+  NSLog( @"peerConnectionAddTrack");
+  [self buildTransceivers:peerConnection];
+}
+
+RCT_EXPORT_METHOD(peerConnectionRemoveTrack:(nonnull NSString *)trackID streamID:(nonnull NSString *)streamID objectID:(nonnull NSNumber *)objectID)
+{
+  RTCPeerConnection *peerConnection = self.peerConnections[objectID];
+  if (!peerConnection) {
+    return;
+  }
+
+  RTCMediaStreamTrack *track = self.localTracks[trackID];
+  if (!track) {
+    return;
+  }
+
+  RTCRtpSender *sender = self.rtpSenders[trackID];
+
+  [peerConnection removeTrack:sender];
+  [self.rtpSenders removeObjectForKey:trackID];
+  [self.bridge.eventDispatcher sendDeviceEventWithName:@"peerConnectionRemovedSender"
+    body:@{@"id": peerConnection.reactTag, @"senderId": sender.senderId, @"senderTrackId": trackID}];
+
+  NSLog( @"peerConnectionRemoveTrack");
+  [self buildTransceivers:peerConnection];
 }
 
 RCT_EXPORT_METHOD(peerConnectionRemoveStream:(nonnull NSString *)streamID objectID:(nonnull NSNumber *)objectID)
@@ -312,6 +365,35 @@ RCT_EXPORT_METHOD(peerConnectionGetStats:(nonnull NSString *)trackID
   }
 }
 
+- (void)buildTransceivers:(RTCPeerConnection *)peerConnection
+{
+    NSMutableArray *_transceivers = [NSMutableArray array];
+      for (int i = 0; i < [peerConnection.transceivers count]; i++) {
+          NSString *_senderTrackId;
+          NSString *_receiverTrackId;
+          NSString *_mid;
+          if (peerConnection.transceivers[i].sender.track) {
+              _senderTrackId = peerConnection.transceivers[i].sender.track.trackId;
+          } else {
+              _senderTrackId = @"";
+          }
+          if (peerConnection.transceivers[i].receiver.track) {
+              _receiverTrackId = peerConnection.transceivers[i].receiver.track.trackId;
+          } else {
+              _receiverTrackId = @"";
+          }
+          if (peerConnection.transceivers[i].mid) {
+              _mid = peerConnection.transceivers[i].mid;
+          } else {
+              _mid = @"";
+          }
+          NSDictionary *_transceiver = @{@"senderTrackId": _senderTrackId, @"receiverTrackId": _receiverTrackId, @"transceiverMid": _mid};
+          [_transceivers addObject:_transceiver];
+      }
+      NSLog( @"buildTransceivers _transceivers: '%@'", _transceivers );
+      [self.bridge.eventDispatcher sendDeviceEventWithName:@"peerConnectionUpdatedTransceivers"
+      body:@{@"id": peerConnection.reactTag, @"transceivers": _transceivers}];
+}
 /**
  * Constructs a JSON <tt>NSString</tt> representation of a specific array of
  * <tt>RTCLegacyStatsReport</tt>s.
@@ -415,6 +497,100 @@ RCT_EXPORT_METHOD(peerConnectionGetStats:(nonnull NSString *)trackID
 - (void)peerConnection:(RTCPeerConnection *)peerConnection didChangeSignalingState:(RTCSignalingState)newState {
   [self.bridge.eventDispatcher sendDeviceEventWithName:@"peerConnectionSignalingStateChanged" body:
    @{@"id": peerConnection.reactTag, @"signalingState": [self stringForSignalingState:newState]}];
+}
+
+- (void)peerConnection:(RTCPeerConnection *)peerConnection didStartReceivingOnTransceiver:(nonnull RTCRtpTransceiver *)transceiver {
+    // triggered when track is added on the remote
+}
+
+-(void)peerConnection:(RTCPeerConnection *)peerConnection didAddReceiver:(nonnull RTCRtpReceiver *)rtpReceiver streams:(nonnull NSArray<RTCMediaStream *> *)mediaStreams {
+    NSString *streamReactTag = [[NSUUID UUID] UUIDString];
+    NSString *_receiverId = rtpReceiver.receiverId;
+
+    NSLog( @"didAddReceiver");
+    [self buildTransceivers:peerConnection];
+
+    NSMutableArray *_transceivers = [NSMutableArray array];
+    NSString *mid = nil;
+    for (int i = 0; i < [peerConnection.transceivers count]; i++) {
+        NSString *receiverId = peerConnection.transceivers[i].receiver.receiverId;
+        if ([receiverId isEqualToString:_receiverId]) {
+            mid = peerConnection.transceivers[i].mid;
+        }
+    }
+
+    if (!mid) {
+        RCTLogWarn(@"didAddReceiver - no transceiverMid, rtpReceiver: %@, peerConnection.transceivers: %@", rtpReceiver, peerConnection.transceivers);
+        return;
+    }
+
+    for (int i = 0; i < [mediaStreams count]; i++) {
+        NSMutableArray *streams = [NSMutableArray array];
+        NSMutableArray *tracks = [NSMutableArray array];
+        RTCMediaStream *mediaStream = mediaStreams[i];
+        for (RTCVideoTrack *videoTrack in mediaStream.videoTracks) {
+          peerConnection.remoteTracks[videoTrack.trackId] = videoTrack;
+          [peerConnection addVideoTrackAdapter:streamReactTag track:videoTrack];
+            NSDictionary *trackInfo = @{@"id": videoTrack.trackId, @"kind": videoTrack.kind, @"label": videoTrack.trackId, @"enabled": @(videoTrack.isEnabled), @"remote": @(YES), @"readyState": @"live"};
+            [tracks addObject:trackInfo];
+            [streams addObject:@{@"id": mediaStream.streamId, @"streamId": mediaStream.streamId, @"streamReactTag": streamReactTag, @"tracks": tracks}];
+            [self.bridge.eventDispatcher sendDeviceEventWithName:@"peerConnectionAddTrack"
+                                                            body:@{@"id": peerConnection.reactTag, @"track": trackInfo, @"streamReactTag": streamReactTag, @"streams": streams, @"transceiverMid": mid}];
+            [self.bridge.eventDispatcher sendDeviceEventWithName:@"peerConnectionUpdatedTransceivers"
+            body:@{@"id": peerConnection.reactTag, @"transceivers": _transceivers}];
+            peerConnection.remoteStreams[streamReactTag] = mediaStream;
+        }
+
+        for (RTCAudioTrack *audioTrack in mediaStream.audioTracks) {
+          peerConnection.remoteTracks[audioTrack.trackId] = audioTrack;
+            NSDictionary *trackInfo = @{@"id": audioTrack.trackId, @"kind": audioTrack.kind, @"label": audioTrack.trackId, @"enabled": @(audioTrack.isEnabled), @"remote": @(YES), @"readyState": @"live"};
+            [tracks addObject:trackInfo];
+            [streams addObject:@{@"id": mediaStream.streamId, @"streamId": mediaStream.streamId, @"streamReactTag": streamReactTag, @"tracks": tracks}];
+            [self.bridge.eventDispatcher sendDeviceEventWithName:@"peerConnectionAddTrack"
+                                                            body:@{@"id": peerConnection.reactTag, @"track": trackInfo, @"streamReactTag": streamReactTag, @"streams": streams, @"transceiverMid": mid,  @"transceivers": _transceivers}];
+            [self.bridge.eventDispatcher sendDeviceEventWithName:@"peerConnectionUpdatedTransceivers"
+            body:@{@"id": peerConnection.reactTag, @"transceivers": _transceivers}];
+            peerConnection.remoteStreams[streamReactTag] = mediaStream;
+        }
+    }
+}
+
+- (void)peerConnection:(RTCPeerConnection *)peerConnection didRemoveReceiver:(nonnull RTCRtpReceiver *)rtpReceiver {
+    RTCMediaStreamTrack *receiverTrack = rtpReceiver.track;
+    NSString *receiverTrackId = receiverTrack.trackId;
+    RTCMediaStreamTrack *removedTrack = nil;
+    RTCMediaStream *removedStream = nil;
+    for (NSString *aReactTag in peerConnection.remoteStreams) {
+      RTCMediaStream *aStream = peerConnection.remoteStreams[aReactTag];
+        for (RTCVideoTrack *videoTrack in aStream.videoTracks) {
+            NSString *trackId = videoTrack.trackId;
+            if ([trackId isEqualToString:receiverTrackId]) {
+                removedTrack = videoTrack;
+                removedStream = aStream;
+                [peerConnection removeVideoTrackAdapter:videoTrack];
+                break;
+            }
+        }
+        for (RTCVideoTrack *audioTrack in aStream.audioTracks) {
+            NSString *trackId = audioTrack.trackId;
+            if ([trackId isEqualToString:receiverTrackId]) {
+                removedTrack = audioTrack;
+                removedStream = aStream;
+                break;
+            }
+        }
+    }
+    if (!removedTrack || !removedStream) {
+      RCTLogWarn(@"didRemoveReceiver - stream not found for track, id: %@", removedTrack.trackId);
+      return;
+    }
+    NSDictionary *trackInfo = @{@"id": removedTrack.trackId, @"kind": removedTrack.kind, @"label": removedTrack.trackId, @"enabled": @(removedTrack.isEnabled), @"remote": @(YES), @"readyState": @"ended"};
+    NSDictionary *streamInfo = @{@"id": removedStream.streamId};
+//    [self.bridge.eventDispatcher sendDeviceEventWithName:@"peerConnectionRemovedTrack"
+//                                                    body:@{@"id": peerConnection.reactTag, @"track": trackInfo, @"stream": streamInfo}];
+
+    NSLog( @"didRemoveReceiver");
+    [self buildTransceivers:peerConnection];
 }
 
 - (void)peerConnection:(RTCPeerConnection *)peerConnection didAddStream:(RTCMediaStream *)stream {
