@@ -307,6 +307,32 @@ export default class RTCPeerConnection extends EventTarget(PEER_CONNECTION_EVENT
     return this._senders;
   }
 
+  _updateTransceivers(ev) {
+    // transceivers list is built from native on every call
+    this._transceivers = [];
+    for (let i = 0; i < ev.transceivers.length; i += 1) {
+      const transceiver = {
+        mid: ev.transceivers[i]["transceiverMid"],
+        sender: {
+          track: null,
+        },
+        receiver: {
+          track: null,
+        },
+      };
+      if (ev.transceivers[i]["senderTrackId"]) {
+        transceiver.sender.track = {};
+        transceiver.sender.track["id"] = ev.transceivers[i]["senderTrackId"]
+      };
+      if (ev.transceivers[i]["receiverTrackId"]) {
+        transceiver.receiver.track = {};
+        transceiver.receiver.track["id"] = ev.transceivers[i]["receiverTrackId"]
+      };
+      this._transceivers.push(transceiver);
+      console.log('_updateTransceivers this._transceivers', this._transceivers);
+    }
+  }
+
   close() {
     WebRTCModule.peerConnectionClose(this._peerConnectionId);
   }
@@ -353,6 +379,15 @@ export default class RTCPeerConnection extends EventTarget(PEER_CONNECTION_EVENT
         this.dispatchEvent(new RTCEvent('signalingstatechange'));
       }),
 
+      DeviceEventEmitter.addListener('peerConnectionUpdatedTransceivers', ev => {
+        if (ev.id !== this._peerConnectionId) {
+          return;
+        }
+        if (ev.transceivers && ev.transceivers.length > 0) {
+          this._updateTransceivers(ev);
+        }
+      }),
+
       DeviceEventEmitter.addListener('peerConnectionAddTrack', ev => {
         if (ev.id !== this._peerConnectionId) {
           return;
@@ -373,29 +408,9 @@ export default class RTCPeerConnection extends EventTarget(PEER_CONNECTION_EVENT
           this.dispatchEvent(new RTCTrackEvent ('track', { transceiver: { mid: ev.transceiverMid }, track, streams: [stream]}));
           this._remoteStreams.push(stream);
         })
-        if (ev.transceivers.length > 0) {
-          // transceivers list is built from native on every call
-          this._transceivers = [];
-          for (let i = 0; i < ev.transceivers.length; i += 1) {
-            const transceiver = {
-              mid: ev.transceivers[i]["transceiverMid"],
-              sender: {
-                track: null,
-              },
-              receiver: {
-                track: null,
-              },
-            };
-            if (ev.transceivers[i]["senderTrackId"]) {
-              transceiver.sender.track = {};
-              transceiver.sender.track["id"] = ev.transceivers[i]["senderTrackId"]
-            };
-            if (ev.transceivers[i]["receiverTrackId"]) {
-              transceiver.receiver.track = {};
-              transceiver.receiver.track["id"] = ev.transceivers[i]["receiverTrackId"]
-            };
-            this._transceivers.push(transceiver);
-          }
+        // android passes transceivers in peerConnectionAddTrack while iOS passes transceivers in peerConnectionUpdatedTransceivers
+        if (ev.transceivers && ev.transceivers.length > 0) {
+          this._updateTransceivers(ev);
         }
       }),
 
