@@ -118,8 +118,7 @@ export default class RTCDataChannel extends EventTarget(DATA_CHANNEL_EVENTS) {
     this._subscriptions = [
       DeviceEventEmitter.addListener('dataChannelStateChanged', ev => {
         this.readyState = ev.state;
-        if (ev.peerConnectionId !== this._peerConnectionId
-            || ev.id !== this.id) {
+        if (ev.peerConnectionId !== this._peerConnectionId) {
           return;
         }
         if (this.readyState === 'open') {
@@ -130,8 +129,7 @@ export default class RTCDataChannel extends EventTarget(DATA_CHANNEL_EVENTS) {
         }
       }),
       DeviceEventEmitter.addListener('dataChannelReceiveMessage', ev => {
-        if (ev.peerConnectionId !== this._peerConnectionId
-            || ev.id !== this.id) {
+        if (ev.peerConnectionId !== this._peerConnectionId) {
           return;
         }
         let data = ev.data;
