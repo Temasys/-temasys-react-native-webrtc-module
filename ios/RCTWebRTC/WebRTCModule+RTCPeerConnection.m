@@ -535,7 +535,7 @@ RCT_EXPORT_METHOD(peerConnectionGetStats:(nonnull NSString *)trackID
             [tracks addObject:trackInfo];
             [streams addObject:@{@"id": mediaStream.streamId, @"streamId": mediaStream.streamId, @"streamReactTag": streamReactTag, @"tracks": tracks}];
             [self.bridge.eventDispatcher sendDeviceEventWithName:@"peerConnectionAddTrack"
-                                                            body:@{@"id": peerConnection.reactTag, @"track": trackInfo, @"streamReactTag": streamReactTag, @"streams": streams, @"transceiverMid": mid}];
+                                                            body:@{@"id": peerConnection.reactTag, @"track": trackInfo, @"streamReactTag": streamReactTag, @"streams": streams, @"transceiverMid": mid, @"transceivers": _transceivers}];
             [self.bridge.eventDispatcher sendDeviceEventWithName:@"peerConnectionUpdatedTransceivers"
             body:@{@"id": peerConnection.reactTag, @"transceivers": _transceivers}];
             peerConnection.remoteStreams[streamReactTag] = mediaStream;
