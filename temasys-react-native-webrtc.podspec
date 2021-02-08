@@ -12,7 +12,7 @@ Pod::Spec.new do |s|
   s.source              = { :git => 'git@github.com:Temasys/temasys-react-native-webrtc-module.git', :tag => 'test' }
   s.requires_arc        = true
 
-  s.platforms           = { :ios => '11.0', :osx => '10.13' }
+  s.platforms           = { :ios => '11.0' }
 
   s.preserve_paths      = 'ios/**/*'
   s.source_files        = 'ios/**/*.{h,m}'
